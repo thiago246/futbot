@@ -1,0 +1,1958 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API Aplicación de Fútbol JcJ",
+    "description": "Contrato de API para toda la aplicación (usuarios, clubes, jugadores, comportamientos, ligas, partidos y ranking). No incluye el contrato de primitivas de programación de comportamientos (documento aparte).\n",
+    "version": "1.1.0"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Users"
+    },
+    {
+      "name": "Clubs"
+    },
+    {
+      "name": "Players"
+    },
+    {
+      "name": "Behaviors"
+    },
+    {
+      "name": "Squads"
+    },
+    {
+      "name": "Leagues"
+    },
+    {
+      "name": "Matches"
+    },
+    {
+      "name": "Ranking"
+    }
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Crea una cuenta nueva y su club, en un único paso atómico",
+        "description": "El actor externo registra su usuario Y su club en la misma acción (un solo formulario, una sola llamada). El sistema crea ambas entidades en una transacción y devuelve un token ya autenticado (auto-login) — no hace falta un login posterior para la primera vez.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "email",
+                  "password",
+                  "avatar",
+                  "clubNombre"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  },
+                  "avatar": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "clubNombre": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Cuenta y club creados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "club": {
+                      "$ref": "#/components/schemas/Club"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email ya registrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "EMAIL_ALREADY_EXISTS",
+                    "message": "El email ya está registrado"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Autentica y devuelve un token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login exitoso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciales inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "Email o contraseña incorrectos"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Perfil del usuario autenticado",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/clubs/me": {
+      "get": {
+        "tags": [
+          "Clubs"
+        ],
+        "summary": "Datos del club propio",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Club"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/clubs/me/players": {
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Crea un jugador en el club propio",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "atributos"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "atributos": {
+                    "$ref": "#/components/schemas/Atributos"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Jugador creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Player"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Atributos inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "fuera_de_rango": {
+                    "value": {
+                      "error": {
+                        "code": "ATTRIBUTE_OUT_OF_RANGE",
+                        "message": "Cada atributo debe estar entre 20 y 100"
+                      }
+                    }
+                  },
+                  "suma_invalida": {
+                    "value": {
+                      "error": {
+                        "code": "ATTRIBUTE_SUM_INVALID",
+                        "message": "La suma de los 5 atributos debe ser exactamente 300"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Lista los jugadores del club propio",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Player"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/clubs/me/players/{playerId}": {
+      "delete": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Elimina un jugador",
+        "parameters": [
+          {
+            "name": "playerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Eliminado"
+          },
+          "409": {
+            "description": "El jugador está en la plantilla de un partido en curso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "PLAYER_IN_ACTIVE_SQUAD",
+                    "message": "No se puede eliminar: está en un partido en curso"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/behaviors": {
+      "post": {
+        "tags": [
+          "Behaviors"
+        ],
+        "summary": "Crea un comportamiento nuevo",
+        "description": "La validación del código ocurre automáticamente como parte de este mismo paso; no existe una acción separada para \"validar\" un comportamiento ya guardado sin validar (todo comportamiento guardado está siempre validado).\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nombre",
+                  "codigo"
+                ],
+                "properties": {
+                  "nombre": {
+                    "type": "string"
+                  },
+                  "codigo": {
+                    "type": "string",
+                    "description": "Código Python del comportamiento"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comportamiento creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Behavior"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Código inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_BEHAVIOR_CODE",
+                    "message": "El código no cumple la API expuesta"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Behaviors"
+        ],
+        "summary": "Lista los comportamientos del usuario",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Behavior"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/behaviors/{behaviorId}": {
+      "get": {
+        "tags": [
+          "Behaviors"
+        ],
+        "summary": "Detalle de un comportamiento",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BehaviorId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Behavior"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Behaviors"
+        ],
+        "summary": "Edita el código (si no está en uso)",
+        "description": "La validación del nuevo código ocurre automáticamente como parte de este mismo paso.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BehaviorId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "codigo"
+                ],
+                "properties": {
+                  "codigo": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          },
+          "409": {
+            "description": "El comportamiento está en uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "BEHAVIOR_IN_USE",
+                    "message": "El comportamiento está en uso en un partido en curso"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Código inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Behaviors"
+        ],
+        "summary": "Elimina un comportamiento",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BehaviorId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Eliminado"
+          }
+        }
+      }
+    },
+    "/clubs/me/squad/{squadID}": {
+      "get": {
+        "tags": [
+          "Squads"
+        ],
+        "summary": "Consulta una plantilla del club",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SquadInput"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "El club todavía no configuró ninguna plantilla default"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Squads"
+        ],
+        "summary": "Define/reemplaza una plantilla del club",
+        "description": "Esta es la \"plantilla formada\" del club: 6 jugadores, 6 comportamientos y una alineación (3 titulares + 3 suplentes). Es un PRERREQUISITO para crear (POST /matches) o unirse (POST /matches/{matchId}/join) a un amistoso — sin ella, ambas operaciones devuelven SQUAD_NOT_CONFIGURED. También es la que el sistema usa automáticamente para cualquier partido cuando el usuario no confirma una plantilla puntual en /matches/{matchId}/squad antes de POST /matches/{matchId}/start.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SquadInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plantilla default actualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SquadInput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Club con menos de 6 jugadores, o jugador repetido en la plantilla",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_PLAYERS",
+                    "message": "El club debe tener al menos 6 jugadores"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/squad": {
+      "post": {
+        "tags": [
+          "Squads"
+        ],
+        "summary": "Confirma la plantilla del club propio para el partido (opcional)",
+        "description": "Permite ajustar, solo para este partido, la plantilla que se usará en lugar de la plantilla default del club. Si el usuario no llama a este endpoint (ni a su PATCH) antes de POST /matches/{matchId}/start, el sistema copia automáticamente la plantilla default del club (GET /clubs/me/squad).\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SquadInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plantilla confirmada"
+          },
+          "409": {
+            "description": "El partido ya comenzó",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "MATCH_ALREADY_STARTED",
+                    "message": "No se puede modificar la plantilla"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Club con menos de 6 jugadores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INSUFFICIENT_PLAYERS",
+                    "message": "El club debe tener al menos 6 jugadores"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Squads"
+        ],
+        "summary": "Modifica la plantilla (solo antes de POST /matches/{matchId}/start)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SquadInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plantilla actualizada"
+          },
+          "409": {
+            "description": "El partido ya comenzó"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Squads"
+        ],
+        "summary": "Consulta la plantilla propia del partido",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SquadInput"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leagues": {
+      "post": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Crea una liga",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nombre",
+                  "esPrivada",
+                  "minEquipos",
+                  "maxEquipos",
+                  "duracionPartido"
+                ],
+                "properties": {
+                  "nombre": {
+                    "type": "string"
+                  },
+                  "esPrivada": {
+                    "type": "boolean"
+                  },
+                  "password": {
+                    "type": "string",
+                    "writeOnly": true,
+                    "description": "Requerida y no vacía cuando esPrivada es true. Se usa para que otros clubes puedan inscribirse vía POST /leagues/{leagueId}/join. No se persiste en texto plano ni se devuelve en ninguna respuesta.\n"
+                  },
+                  "minEquipos": {
+                    "type": "integer",
+                    "minimum": 3
+                  },
+                  "maxEquipos": {
+                    "type": "integer"
+                  },
+                  "duracionPartido": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      3,
+                      5
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Liga creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/League"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Mínimo de equipos inválido, o liga privada sin contraseña",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "min_equipos": {
+                    "value": {
+                      "error": {
+                        "code": "MIN_TEAMS_TOO_LOW",
+                        "message": "minEquipos no puede ser menor a 3"
+                      }
+                    }
+                  },
+                  "password_vacia": {
+                    "value": {
+                      "error": {
+                        "code": "EMPTY_LEAGUE_PASSWORD",
+                        "message": "Una liga privada requiere una contraseña no vacía"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Lista ligas públicas",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedLeagues"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leagues/{leagueId}": {
+      "get": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Detalle de una liga",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeagueId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/League"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leagues/{leagueId}/join": {
+      "post": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Inscribe al club propio en la liga",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeagueId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "description": "Requerida solo si la liga es privada."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inscripción exitosa"
+          },
+          "401": {
+            "description": "Contraseña incorrecta (liga privada)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_LEAGUE_PASSWORD",
+                    "message": "La contraseña ingresada es incorrecta"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Liga llena o ya iniciada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leagues/{leagueId}/leave": {
+      "post": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Abandona la liga (si aún no disputó partidos)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeagueId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Abandono exitoso"
+          },
+          "409": {
+            "description": "Ya disputó partidos en la liga",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "ALREADY_PLAYED_MATCHES",
+                    "message": "No se puede abandonar la liga"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leagues/{leagueId}/cancel": {
+      "post": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Cancela la liga (solo el dueño, si no comenzó)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeagueId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Liga cancelada"
+          },
+          "403": {
+            "description": "El usuario no es dueño de la liga",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "NOT_LEAGUE_OWNER",
+                    "message": "Solo el dueño puede cancelar la liga"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La liga ya comenzó"
+          }
+        }
+      }
+    },
+    "/leagues/{leagueId}/standings": {
+      "get": {
+        "tags": [
+          "Leagues"
+        ],
+        "summary": "Tabla de posiciones de la liga",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeagueId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "clubId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "nombre": {
+                        "type": "string"
+                      },
+                      "puntos": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Publica un partido amistoso abierto (sin rival) en el lobby",
+        "description": "El club creador queda automáticamente como LOCAL (clubLocalId), sin rival asignado. El partido queda listado como esperando_rival hasta que otro club se una vía POST /matches/{matchId}/join, que pasa a ser el VISITANTE. Requiere que el club creador tenga una plantilla default formada (ver PUT /clubs/me/squad).\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "duracion"
+                ],
+                "properties": {
+                  "duracion": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      3,
+                      5
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Partido creado, esperando rival",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Match"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Duración inválida, o el club no tiene plantilla default configurada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "duracion_invalida": {
+                    "value": {
+                      "error": {
+                        "code": "INVALID_DURATION",
+                        "message": "La duración debe ser 1, 3 o 5 minutos"
+                      }
+                    }
+                  },
+                  "sin_plantilla": {
+                    "value": {
+                      "error": {
+                        "code": "SQUAD_NOT_CONFIGURED",
+                        "message": "Configurá tu plantilla default antes de crear un amistoso"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Lista partidos amistosos, filtrando por estado",
+        "parameters": [
+          {
+            "name": "estado",
+            "in": "query",
+            "description": "Ej. esperando_rival (disponibles para unirse) o en_curso (para espectar)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "esperando_rival",
+                "cuenta_regresiva",
+                "en_curso",
+                "pausado",
+                "finalizado"
+              ]
+            }
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "amistoso",
+                "liga"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Match"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pageSize": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/join": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Une al club propio como visitante a un amistoso esperando rival",
+        "description": "Requiere que el club propio tenga una plantilla default formada (ver PUT /clubs/me/squad). El club propio queda como clubVisitanteId.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unión exitosa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Match"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Partido no disponible, ya tiene rival, o es el propio club",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "lleno": {
+                    "value": {
+                      "error": {
+                        "code": "MATCH_FULL",
+                        "message": "El partido ya tiene los dos clubes asignados"
+                      }
+                    }
+                  },
+                  "no_disponible": {
+                    "value": {
+                      "error": {
+                        "code": "MATCH_NOT_AVAILABLE",
+                        "message": "El partido no está disponible para unirse"
+                      }
+                    }
+                  },
+                  "propio_club": {
+                    "value": {
+                      "error": {
+                        "code": "CANNOT_JOIN_OWN_MATCH",
+                        "message": "No podés unirte a tu propio partido"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "El club no tiene plantilla default configurada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SQUAD_NOT_CONFIGURED",
+                    "message": "Configurá tu plantilla default antes de unirte a un amistoso"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/start": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Inicia el partido (transición a en_curso)",
+        "description": "Congela la plantilla efectiva del partido para cada club: usa la confirmada vía POST/PATCH /matches/{matchId}/squad si existe, o copia la plantilla default del club (GET /clubs/me/squad) en su defecto. Valida que ninguno de los 6 comportamientos de esa plantilla esté actualmente en uso en otro partido en_curso (una vez que un comportamiento queda \"reservado\" para un partido, no puede usarse en otro mientras ese partido siga en curso — aunque el mismo JUGADOR sí puede participar en varios partidos simultáneos sin problema). Puede invocarlo cualquiera de los dos clubes del partido.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Partido iniciado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Match"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El partido no está listo para iniciar, o hay conflicto de comportamientos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "falta_rival": {
+                    "value": {
+                      "error": {
+                        "code": "MATCH_NOT_READY",
+                        "message": "El partido todavía no tiene rival asignado"
+                      }
+                    }
+                  },
+                  "comportamiento_en_uso": {
+                    "value": {
+                      "error": {
+                        "code": "BEHAVIOR_IN_USE",
+                        "message": "Un comportamiento de la plantilla ya está en uso en otro partido en curso"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ningún club tiene una plantilla disponible (ni de partido, ni default)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SQUAD_NOT_CONFIGURED",
+                    "message": "Alguno de los clubes no tiene una plantilla disponible para jugar"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/state": {
+      "get": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Estado actual del partido",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "estado": {
+                      "type": "string",
+                      "enum": [
+                        "esperando_rival",
+                        "programado",
+                        "cuenta_regresiva",
+                        "en_curso",
+                        "pausado",
+                        "finalizado"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/plan-changes": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Planifica sustituciones/cambios de comportamiento para la próxima pausa",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sustituciones": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "playerOutId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "playerInId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  },
+                  "cambiosComportamiento": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "playerId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "behaviorId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cambios planificados"
+          },
+          "409": {
+            "description": "Límite de sustituciones alcanzado o comportamiento en uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/substitution": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Ejecuta una sustitución en la pausa actual",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "playerOutId",
+                  "playerInId"
+                ],
+                "properties": {
+                  "playerOutId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "playerInId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sustitución realizada"
+          },
+          "409": {
+            "description": "Límite de sustituciones alcanzado (máximo 3, una por pausa)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SUBSTITUTION_LIMIT_REACHED",
+                    "message": "Ya se usaron las 3 sustituciones disponibles"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matches/{matchId}/behavior-change": {
+      "post": {
+        "tags": [
+          "Matches"
+        ],
+        "summary": "Cambia el comportamiento asignado a un jugador",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MatchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "playerId",
+                  "behaviorId"
+                ],
+                "properties": {
+                  "playerId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "behaviorId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comportamiento actualizado"
+          },
+          "409": {
+            "description": "El comportamiento ya está en uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "BEHAVIOR_CURRENTLY_IN_USE",
+                    "message": "El comportamiento está en uso"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ranking/clubs": {
+      "get": {
+        "tags": [
+          "Ranking"
+        ],
+        "summary": "Ranking global de clubes por puntos",
+        "description": "Solo suman puntos los amistosos y los partidos de ligas públicas; los partidos de ligas privadas quedan excluidos del cómputo.\n",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Club"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pageSize": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "ClubId": {
+        "name": "clubId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "BehaviorId": {
+        "name": "behaviorId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "MatchId": {
+        "name": "matchId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "LeagueId": {
+        "name": "leagueId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "avatar": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "Club": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "puntosRanking": {
+            "type": "integer"
+          }
+        }
+      },
+      "Atributos": {
+        "type": "object",
+        "required": [
+          "fuerza",
+          "control",
+          "precision",
+          "agilidad",
+          "velocidad"
+        ],
+        "description": "Cada atributo entre 20 y 100; la suma de los 5 debe ser exactamente 300. Esta validación de suma cruzada no es representable en el schema de OpenAPI 3.0 y se aplica server-side; ver el error ATTRIBUTE_SUM_INVALID en POST /clubs/me/players.\n",
+        "properties": {
+          "fuerza": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100
+          },
+          "control": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100
+          },
+          "precision": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100
+          },
+          "agilidad": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100
+          },
+          "velocidad": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100
+          }
+        }
+      },
+      "Player": {
+        "type": "object",
+        "description": "Un mismo jugador puede formar parte de las plantillas de varios partidos en_curso simultáneamente — la restricción de uso exclusivo aplica a los COMPORTAMIENTOS (ver Behavior), no a los jugadores.\n",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "atributos": {
+            "$ref": "#/components/schemas/Atributos"
+          }
+        }
+      },
+      "Behavior": {
+        "type": "object",
+        "description": "Un comportamiento solo puede estar en uso en UN partido en_curso a la vez. Queda reservado para un partido recién cuando ese partido arranca (POST /matches/{matchId}/start), y se libera cuando el partido finaliza. Ver BEHAVIOR_IN_USE en ese endpoint.\n",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "esDefault": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SquadEntry": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "behaviorId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SquadInput": {
+        "type": "object",
+        "required": [
+          "titulares",
+          "suplentes"
+        ],
+        "description": "La \"plantilla formada\": 6 jugadores distintos + 6 comportamientos (uno por jugador) + una alineación (3 titulares, 3 suplentes).\n",
+        "properties": {
+          "titulares": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SquadEntry"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "suplentes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SquadEntry"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        }
+      },
+      "League": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "esPrivada": {
+            "type": "boolean"
+          },
+          "minEquipos": {
+            "type": "integer"
+          },
+          "maxEquipos": {
+            "type": "integer"
+          },
+          "duracionPartido": {
+            "type": "integer"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "esperando_equipos",
+              "en_curso",
+              "finalizada",
+              "cancelada"
+            ]
+          }
+        }
+      },
+      "PaginatedLeagues": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/League"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pageSize": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Match": {
+        "type": "object",
+        "description": "clubLocalId es siempre el club que creó el partido (POST /matches); clubVisitanteId es el club que se unió (POST /matches/{matchId}/join), null mientras el estado es esperando_rival. El ganador/perdedor y el resultado exacto se derivan comparando resultadoLocal contra resultadoVisitante una vez que el partido está finalizado (empate si son iguales).\n",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "amistoso",
+              "liga"
+            ]
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "esperando_rival",
+              "programado",
+              "cuenta_regresiva",
+              "en_curso",
+              "pausado",
+              "finalizado"
+            ]
+          },
+          "clubLocalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clubVisitanteId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Null mientras el amistoso está en estado esperando_rival."
+          },
+          "resultadoLocal": {
+            "type": "integer"
+          },
+          "resultadoVisitante": {
+            "type": "integer"
+          },
+          "duracion": {
+            "type": "integer"
+          },
+          "sustitucionesRestantes": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

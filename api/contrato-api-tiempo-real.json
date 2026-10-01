@@ -1,0 +1,241 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "API de Partido en Vivo — Aplicación de Fútbol JcJ",
+    "version": "1.1.0",
+    "description": "Contrato del canal en tiempo real usado para ver un partido en curso. Complementa al contrato REST (OpenAPI) de la aplicación: mientras ese cubre creación/gestión de recursos, este cubre el streaming de estado mientras el partido está en curso.\n"
+  },
+  "servers": {
+    "live": {
+      "url": "wss://api.miapp.com/api/v1",
+      "protocol": "wss",
+      "description": "Servidor de WebSocket para partidos en vivo"
+    }
+  },
+  "channels": {
+    "/matches/{matchId}/live": {
+      "parameters": {
+        "matchId": {
+          "description": "ID del partido a observar",
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "bindings": {
+        "ws": {
+          "query": {
+            "type": "object",
+            "required": [
+              "token"
+            ],
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "JWT del usuario, usado para determinar qué panel arma el servidor"
+              }
+            }
+          }
+        }
+      },
+      "subscribe": {
+        "summary": "Mensajes que el servidor envía al cliente conectado. El panel que recibe cada cliente depende de su rol respecto al partido: - Panel propio: titulares, suplentes y estadísticas - Panel rival / espectador neutral: solo titulares y estadísticas\n",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/Tick"
+            },
+            {
+              "$ref": "#/components/messages/PausaIniciada"
+            },
+            {
+              "$ref": "#/components/messages/SustitucionRealizada"
+            },
+            {
+              "$ref": "#/components/messages/PartidoFinalizado"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "messages": {
+      "Tick": {
+        "name": "tick",
+        "title": "Actualización de estado del partido",
+        "summary": "Se emite en cada tick de la simulación mientras el partido está en curso",
+        "payload": {
+          "type": "object",
+          "required": [
+            "tipo",
+            "pelota",
+            "posiciones",
+            "marcador",
+            "tiempoRestante"
+          ],
+          "properties": {
+            "tipo": {
+              "type": "string",
+              "enum": [
+                "tick"
+              ]
+            },
+            "pelota": {
+              "type": "object",
+              "description": "Posición absoluta de la pelota en este tick.",
+              "required": [
+                "x",
+                "y"
+              ],
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              }
+            },
+            "posiciones": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "jugadorId",
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "jugadorId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "marcador": {
+              "type": "object",
+              "required": [
+                "local",
+                "visitante"
+              ],
+              "properties": {
+                "local": {
+                  "type": "integer"
+                },
+                "visitante": {
+                  "type": "integer"
+                }
+              }
+            },
+            "tiempoRestante": {
+              "type": "integer",
+              "description": "Segundos restantes del tiempo actual"
+            }
+          }
+        }
+      },
+      "PausaIniciada": {
+        "name": "pausa_iniciada",
+        "title": "Inicio de una pausa",
+        "summary": "Se emite cuando comienza un cooling break o el entretiempo",
+        "payload": {
+          "type": "object",
+          "required": [
+            "tipo",
+            "duracion"
+          ],
+          "properties": {
+            "tipo": {
+              "type": "string",
+              "enum": [
+                "pausa_iniciada"
+              ]
+            },
+            "duracion": {
+              "type": "integer",
+              "description": "Duración de la pausa en segundos"
+            }
+          }
+        }
+      },
+      "SustitucionRealizada": {
+        "name": "sustitucion_realizada",
+        "title": "Sustitución ejecutada",
+        "summary": "Se emite cuando un club efectúa una sustitución durante una pausa",
+        "payload": {
+          "type": "object",
+          "required": [
+            "tipo",
+            "clubId",
+            "playerOutId",
+            "playerInId"
+          ],
+          "properties": {
+            "tipo": {
+              "type": "string",
+              "enum": [
+                "sustitucion_realizada"
+              ]
+            },
+            "clubId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "playerOutId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "playerInId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "PartidoFinalizado": {
+        "name": "partido_finalizado",
+        "title": "Fin del partido",
+        "summary": "Se emite al finalizar el partido. Tras este mensaje, el estado en memoria (posiciones, ticks, acciones) se descarta; solo persiste el resultado final.\n",
+        "payload": {
+          "type": "object",
+          "required": [
+            "tipo",
+            "resultado"
+          ],
+          "properties": {
+            "tipo": {
+              "type": "string",
+              "enum": [
+                "partido_finalizado"
+              ]
+            },
+            "resultado": {
+              "type": "object",
+              "required": [
+                "local",
+                "visitante"
+              ],
+              "properties": {
+                "local": {
+                  "type": "integer"
+                },
+                "visitante": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
