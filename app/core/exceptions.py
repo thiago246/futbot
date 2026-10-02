@@ -19,26 +19,20 @@ class AttributeSumInvalidError(Exception):
 class InvalidFormationError(Exception):
     pass
 
-
 class InsufficientPlayersError(Exception):
     pass
-
 
 class DuplicatePlayersError(Exception):
     pass
 
-
 class PlayerNotInClubError(Exception):
     pass
-
 
 class BehaviorNotAvailableError(Exception):
     pass
 
-
 class SquadNotConfiguredError(Exception):
     pass
-
 
 class MinTeamsTooLowError(Exception):
     pass
@@ -94,6 +88,18 @@ class MatchNotAvailableError(Exception):
     pass
 
 class CannotJoinOwnMatchError(Exception):
+    pass
+
+class MaxTeamsTooLowError(Exception):
+    pass
+
+class NotMatchCreatorError(Exception):
+    pass
+
+class MatchNotReadyError(Exception):
+    pass
+
+class MatchAlreadyStartedError(Exception):
     pass
 
 def register_exception_handlers(app):
@@ -196,6 +202,18 @@ def register_exception_handlers(app):
     @app.exception_handler(CannotJoinOwnMatchError)
     def handle_cannot_join_own_match(request: Request, exc: CannotJoinOwnMatchError):
         return JSONResponse(status_code=409, content={"error": {"code": "CANNOT_JOIN_OWN_MATCH", "message": str(exc)}})
+
+    @app.exception_handler(NotMatchCreatorError)
+    def handle_not_match_creator(request: Request, exc: NotMatchCreatorError):
+        return JSONResponse(status_code=403, content={"error": {"code": "NOT_MATCH_CREATOR", "message": str(exc)}})
+
+    @app.exception_handler(MatchNotReadyError)
+    def handle_match_not_ready(request: Request, exc: MatchNotReadyError):
+        return JSONResponse(status_code=409, content={"error": {"code": "MATCH_NOT_READY", "message": str(exc)}})
+
+    @app.exception_handler(MatchAlreadyStartedError)
+    def handle_match_already_started(request: Request, exc: MatchAlreadyStartedError):
+        return JSONResponse(status_code=409, content={"error": {"code": "MATCH_ALREADY_STARTED", "message": str(exc)}})
     
     @app.exception_handler(MinTeamsTooLowError)
     def handle_min_teams_too_low(request: Request, exc: MinTeamsTooLowError):
@@ -225,3 +243,10 @@ def register_exception_handlers(app):
     @app.exception_handler(BehaviorInUseError)
     def handle_behavior_in_use(request: Request, exc: BehaviorInUseError):
         return JSONResponse(status_code=409, content={"error": {"code": "BEHAVIOR_IN_USE", "message": "Behavior is already in use in an ongoing match"}})
+
+    @app.exception_handler(MaxTeamsTooLowError)
+    def handle_max_teams_too_low(request: Request, exc: MaxTeamsTooLowError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "MAX_TEAMS_TOO_LOW", "message": "maxEquipos cannot be less than minEquipos"}},
+        )

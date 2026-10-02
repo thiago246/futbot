@@ -7,8 +7,10 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import update
+from sqlalchemy.orm import sessionmaker
 
 from app.core.exceptions import (
+    BehaviorInUseError,
     CannotJoinOwnMatchError,
     FriendlyNotFoundError,
     InvalidDurationError,
@@ -20,7 +22,7 @@ from app.models.behavior import Behavior
 from app.models.club import Club
 from app.models.club_player import ClubPlayer
 from app.models.friendly import Friendly
-from app.models.squads import Squad, SquadMember
+from app.models.squads import FriendlySquadMember, Squad, SquadMember
 from app.models.user import User
 from app.schemas.friendly import FriendlyCreate
 from app.services import friendly_service
@@ -37,11 +39,16 @@ def _create_club(db, user, name="Los Larry"):
 def _create_default_squad(db, club):
     """Inserta directo en la DB una plantilla válida (6 jugadores, 3 titulares + 3 suplentes),
     para no depender de squads_service en estos tests."""
-    behavior = db.query(Behavior).filter_by(name="test-behavior").first()
-    if behavior is None:
-        behavior = Behavior(name="test-behavior", code="pass", is_default=False)
-        db.add(behavior)
-        db.flush()
+    # 6 comportamientos distintos (un club no puede repetir uno en su plantilla).
+    # Se reutilizan entre clubes: distintos clubes sí pueden usar el mismo.
+    behaviors = []
+    for i in range(6):
+        behavior = db.query(Behavior).filter_by(name=f"test-behavior-{i}").first()
+        if behavior is None:
+            behavior = Behavior(name=f"test-behavior-{i}", code="pass", is_default=False)
+            db.add(behavior)
+            db.flush()
+        behaviors.append(behavior)
 
     players = [
         ClubPlayer(
@@ -61,7 +68,7 @@ def _create_default_squad(db, club):
         db.add(SquadMember(
             squad_id=squad.id,
             club_player_id=player.id,
-            behavior_id=behavior.id,
+            behavior_id=behaviors[i].id,
             is_starter=i < 3,
         ))
     db.commit()
@@ -289,13 +296,13 @@ def _assert_unchanged(db, friendly):
     assert friendly.status == "esperando_rival"
 
 
-def test_join_friendly_assigns_club_as_away_and_schedules_match(db, club_with_squad, rival_with_squad, home_friendly):
+def test_join_friendly_assigns_club_as_away_and_starts_countdown(db, club_with_squad, rival_with_squad, home_friendly):
     joined = friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
 
     assert joined.id == home_friendly.id
     assert joined.away_club_id == rival_with_squad.club.id
     assert joined.home_club_id == club_with_squad.id
-    assert joined.status == "programado"
+    assert joined.status == "cuenta_regresiva"
 
 
 def test_join_friendly_is_persisted_in_db(db, rival_with_squad, home_friendly):
@@ -304,7 +311,7 @@ def test_join_friendly_is_persisted_in_db(db, rival_with_squad, home_friendly):
     db.expire_all()
     saved = db.get(Friendly, home_friendly.id)
     assert saved.away_club_id == rival_with_squad.club.id
-    assert saved.status == "programado"
+    assert saved.status == "cuenta_regresiva"
 
 
 def test_join_friendly_rejects_own_match(db, user, home_friendly):
@@ -396,3 +403,143 @@ def test_join_friendly_loses_race_when_another_club_joins_first(
 
     db.refresh(home_friendly)
     assert home_friendly.away_club_id == other.id
+
+# ---------------------------------------------------------------------------
+# Inicio automático al unirse: plantillas congeladas y cuenta regresiva
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
+def _snapshot(db, friendly_id, club_id=None):
+    query = db.query(FriendlySquadMember).filter_by(friendly_id=friendly_id)
+    if club_id is not None:
+        query = query.filter_by(club_id=club_id)
+    return query.order_by(FriendlySquadMember.id).all()
+
+
+def _squad_members(db, club_id):
+    return (
+        db.query(SquadMember)
+        .join(Squad, SquadMember.squad_id == Squad.id)
+        .filter(Squad.club_id == club_id)
+        .order_by(SquadMember.id)
+        .all()
+    )
+
+
+def test_join_friendly_freezes_both_squads(db, club_with_squad, rival_with_squad, home_friendly):
+    """Ambos clubes usan los mismos 6 comportamientos (los crea el helper una sola vez):
+    clubes distintos sí pueden compartir comportamientos."""
+    friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    for club in (club_with_squad, rival_with_squad.club):
+        rows = _snapshot(db, home_friendly.id, club.id)
+        assert len(rows) == 6
+        assert sum(r.is_starter for r in rows) == 3
+        assert {r.formation for r in rows} == {"1-2"}
+        assert len({r.behavior_id for r in rows}) == 6
+    assert len(_snapshot(db, home_friendly.id)) == 12
+
+
+def test_join_friendly_snapshot_ignores_later_squad_edits(db, club_with_squad, rival_with_squad, home_friendly):
+    friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    squad = db.query(Squad).filter_by(club_id=club_with_squad.id).one()
+    squad.formation = "2-1"
+    db.commit()
+
+    assert {r.formation for r in _snapshot(db, home_friendly.id, club_with_squad.id)} == {"1-2"}
+
+
+def test_join_friendly_rejected_does_not_freeze_anything(db, user, home_friendly):
+    with pytest.raises(CannotJoinOwnMatchError):
+        friendly_service.join_friendly(db, user, home_friendly.id)
+
+    assert _snapshot(db, home_friendly.id) == []
+
+
+def test_join_friendly_twice_does_not_freeze_again(db, rival_with_squad, home_friendly):
+    friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    with pytest.raises(MatchFullError):
+        friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    assert len(_snapshot(db, home_friendly.id)) == 12
+
+
+def test_join_friendly_rejects_incomplete_home_squad(db, club_with_squad, rival_with_squad, home_friendly):
+    """El local pudo editar su plantilla después de publicar el amistoso."""
+    squad = db.query(Squad).filter_by(club_id=club_with_squad.id).one()
+    db.delete(squad.members[-1])
+    db.commit()
+
+    with pytest.raises(SquadRequiredError):
+        friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    _assert_unchanged(db, home_friendly)
+    assert _snapshot(db, home_friendly.id) == []
+
+
+def test_join_friendly_rejects_incomplete_away_squad(db, rival_with_squad, home_friendly):
+    squad = db.query(Squad).filter_by(club_id=rival_with_squad.club.id).one()
+    db.delete(squad.members[-1])
+    db.commit()
+
+    with pytest.raises(SquadRequiredError):
+        friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    _assert_unchanged(db, home_friendly)
+    assert _snapshot(db, home_friendly.id) == []
+
+
+@pytest.mark.parametrize("repeats", ["home", "away"])
+def test_join_friendly_rejects_club_that_repeats_a_behavior(
+    db, club_with_squad, rival_with_squad, home_friendly, repeats
+):
+    """Un comportamiento puede usarse en varios partidos, pero un mismo club no
+    puede usarlo dos veces dentro del mismo partido."""
+    club_id = club_with_squad.id if repeats == "home" else rival_with_squad.club.id
+    members = _squad_members(db, club_id)
+    members[1].behavior_id = members[0].behavior_id
+    db.commit()
+
+    with pytest.raises(BehaviorInUseError):
+        friendly_service.join_friendly(db, rival_with_squad, home_friendly.id)
+
+    _assert_unchanged(db, home_friendly)
+    assert _snapshot(db, home_friendly.id) == []
+
+
+# --- cuenta regresiva ------------------------------------------------------
+def test_countdown_lasts_15_seconds():
+    assert friendly_service.COUNTDOWN_SECONDS == 15
+
+
+@pytest.fixture()
+def fast_countdown(db, monkeypatch):
+    """Sin esperar 15 s y con run_countdown usando la misma DB de los tests."""
+    monkeypatch.setattr(friendly_service, "COUNTDOWN_SECONDS", 0)
+    monkeypatch.setattr(friendly_service, "SessionLocal", sessionmaker(bind=db.get_bind()))
+
+
+@pytest.mark.anyio
+async def test_run_countdown_moves_match_to_in_progress(db, fast_countdown):
+    friendly = _insert_friendly(db, status="cuenta_regresiva", away_club_id="otro-club")
+
+    await friendly_service.run_countdown(friendly.id)
+
+    db.expire_all()
+    assert db.get(Friendly, friendly.id).status == "en_curso"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["esperando_rival", "en_curso", "finalizado"])
+async def test_run_countdown_does_not_touch_match_that_is_not_in_countdown(db, fast_countdown, status):
+    friendly = _insert_friendly(db, status=status)
+
+    await friendly_service.run_countdown(friendly.id)
+
+    db.expire_all()
+    assert db.get(Friendly, friendly.id).status == status

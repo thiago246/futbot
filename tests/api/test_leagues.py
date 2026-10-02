@@ -1,6 +1,8 @@
 from app.core.exceptions import (MatchDurationNotAllowed, MinTeamsTooLowError, 
                                 EmptyLeaguePasswordError, InvalidLeaguePasswordError, 
-                                AlreadyInLeagueError, LeagueNotFoundError, NotInLeagueError)
+                                AlreadyInLeagueError, LeagueNotFoundError, NotInLeagueError,
+                                MaxTeamsTooLowError)
+import pytest
 
 def _register_and_login(client, email="join@example.com", password="12345678"):
     client.post(
@@ -113,6 +115,48 @@ def test_create_league_min_teams_too_low(client):
 
     assert response.status_code == 422
     assert MinTeamsTooLowError
+
+
+@pytest.mark.parametrize("min_teams, max_teams", [(3, 0), (3, 2), (5, 4), (3, -1)])
+def test_create_league_max_teams_below_min(client, min_teams, max_teams):
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/api/v1/leagues",
+        json={
+            "nombre": "Liga Invalida",
+            "esPrivada": False,
+            "minEquipos": min_teams,
+            "maxEquipos": max_teams,
+            "duracionPartido": 3,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 422
+    assert MaxTeamsTooLowError
+
+    # no se creó nada
+    listing = client.get("/api/v1/leagues", headers={"Authorization": f"Bearer {token}"})
+    assert listing.json()["total"] == 0
+
+
+def test_create_league_max_equal_to_min_is_valid(client):
+    token = _register_and_login(client)
+
+    response = client.post(
+        "/api/v1/leagues",
+        json={
+            "nombre": "Liga Justa",
+            "esPrivada": False,
+            "minEquipos": 3,
+            "maxEquipos": 3,
+            "duracionPartido": 3,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
 
 
 def test_create_private_league_without_password(client):

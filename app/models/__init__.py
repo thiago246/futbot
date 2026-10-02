@@ -6,3 +6,4 @@ from app.models.match import Match  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.club import Club
 from app.models.squads import Squad, SquadMember  # noqa: F401
+

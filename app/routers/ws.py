@@ -15,6 +15,7 @@ from app.core.ws_manager import manager
 from app.models.league import League
 from app.models.user import User
 from app.services.lobby_events import lobby_room
+from app.services import league_list_events
 
 # Códigos de cierre propios (rango 4000-4999 reservado para aplicaciones)
 WS_CLOSE_UNAUTHORIZED = 4401
@@ -34,6 +35,28 @@ def _user_from_token(db: Session, token: str | None) -> User | None:
 
 router = APIRouter(tags=["WebSockets"])
 
+@router.websocket("/ws/leagues")
+async def leagues_list_ws(
+    websocket: WebSocket,
+    token: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Avisa en vivo a quien está viendo la lista de ligas (liga_creada, liga_actualizada).
+    Solo emite; lo que mande el cliente se ignora. Token inválido -> cierre 4401."""
+    user = _user_from_token(db, token)
+    db.close()
+    if user is None:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+
+    await manager.connect(league_list_events.LIST_ROOM, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # solo para detectar la desconexión
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(league_list_events.LIST_ROOM, websocket)
 
 @router.websocket("/ws/matches/{match_id}")
 async def match_ws(websocket: WebSocket, match_id: int):
