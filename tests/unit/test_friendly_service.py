@@ -519,9 +519,16 @@ def test_countdown_lasts_15_seconds():
 
 @pytest.fixture()
 def fast_countdown(db, monkeypatch):
-    """Sin esperar 15 s y con run_countdown usando la misma DB de los tests."""
+    """Sin esperar 15 s y con run_countdown usando la misma DB de los tests.
+
+    No lanza el partido de verdad: devuelve la lista de ids que _launch_match recibió.
+    (El armado y la simulación se prueban en test_friendly_match_run.py.)
+    """
     monkeypatch.setattr(friendly_service, "COUNTDOWN_SECONDS", 0)
     monkeypatch.setattr(friendly_service, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    launched: list[str] = []
+    monkeypatch.setattr(friendly_service, "_launch_match", launched.append)
+    return launched
 
 
 @pytest.mark.anyio
@@ -532,6 +539,7 @@ async def test_run_countdown_moves_match_to_in_progress(db, fast_countdown):
 
     db.expire_all()
     assert db.get(Friendly, friendly.id).status == "en_curso"
+    assert fast_countdown == [friendly.id]  # y arrancó la simulación
 
 
 @pytest.mark.anyio
@@ -543,3 +551,4 @@ async def test_run_countdown_does_not_touch_match_that_is_not_in_countdown(db, f
 
     db.expire_all()
     assert db.get(Friendly, friendly.id).status == status
+    assert fast_countdown == []  # no se lanza ningún partido

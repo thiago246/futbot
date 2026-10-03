@@ -11,6 +11,7 @@ from app.core.database import SessionLocal
 from app.core.ws_manager import manager
 from app.behaviors.registry import load_behavior
 from app.engine.behavior_executor import execute_turn
+from app.engine.live_events import match_finished_event, match_room, tick_event
 from app.engine.match_state import FIELD_HEIGHT, FIELD_WIDTH, GOAL_Y_MAX, GOAL_Y_MIN, MatchState
 from app.engine.player_on_field import PlayerOnField, control_range, read_attributes
 from app.models.match import Match
@@ -18,6 +19,10 @@ from app.models.match import Match
 # segundos reales entre tick y tick. Debe coincidir con TICKS_PER_MINUTE
 # de match_state.py (60/min = 1 tick por segundo); si uno cambia, cambia el otro.
 TICK_SECONDS = 1.0
+
+# Tras partido_finalizado, la sala sigue abierta este tiempo para que los espectadores
+# vean el resultado; después el servidor cierra las conexiones.
+ROOM_CLOSE_DELAY_SECONDS = 30
 
 
 class MatchEngine:
@@ -43,11 +48,14 @@ class MatchEngine:
               y el motor la carga una sola vez acá).
         - "formation": nombre elegido en la plantilla ("1-2" o "2-1").
         - "home" es el club creador del partido.
+
+        match_id es el `matchId` de la API (sirve para amistoso o liga): define tanto la fila
+        Match a persistir como la sala del WebSocket /ws/matches/{matchId}/live.
         """
         self.match_id = match_id
         self.participants = participants
         self.duration_minutes = duration_minutes
-        self.room = f"match:{match_id}"
+        self.room = match_room(match_id)
         # Estado en memoria: existe solo mientras el partido está en curso y NUNCA se
         # persiste. Lo crea build_initial_state() y lo descarta discard_state().
         self.state: MatchState | None = None
@@ -109,21 +117,12 @@ class MatchEngine:
         while not self.is_finished():
             self.tick()
             self._persist_state()
-            await manager.broadcast(self.room, self._state_payload())
+            await manager.broadcast(self.room, tick_event(self.state))
             await asyncio.sleep(TICK_SECONDS)
         self._persist_state(final=True)
-        await manager.broadcast(self.room, {"type": "finished", "data": self._state_payload()})
+        await manager.broadcast(self.room, match_finished_event(self.state))
+        manager.schedule_close(self.room, ROOM_CLOSE_DELAY_SECONDS)
         self.discard_state()
-
-    def _state_payload(self) -> dict:
-        """Payload mínimo para el WebSocket."""
-        state = self.state
-        return {
-            "tick": state.current_tick,
-            "ball": {"x": state.ball.x, "y": state.ball.y},
-            "positions": dict(state.positions),
-            "score": {"home": state.home_score, "away": state.away_score},
-        }
 
     def _persist_state(self, final: bool = False) -> None:
         """Guarda en la tabla matches lo que NO es parte del estado en memoria
