@@ -1,7 +1,7 @@
 """WebSockets: el servidor empuja datos en vivo al front.
 
 Autenticación: el navegador no puede mandar headers en un WebSocket, así que el token
-va por query string:  ws://localhost:8000/ws/matches/5?token=<JWT>
+va por query string:  ws://localhost:8000/ws/matches/<matchId>/live?token=<JWT>
 
 Formato de los mensajes (JSON):  {"type": "state" | "event" | "finished", "data": {...}}
 """
@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import ALGORITHM, SECRET_KEY
 from app.core.ws_manager import manager
+from app.engine.live_events import match_room
 from app.models.league import League
 from app.models.user import User
 from app.services.lobby_events import lobby_room
+from app.services import league_list_events, match_service
 
 # Códigos de cierre propios (rango 4000-4999 reservado para aplicaciones)
 WS_CLOSE_UNAUTHORIZED = 4401
@@ -34,21 +36,68 @@ def _user_from_token(db: Session, token: str | None) -> User | None:
 
 router = APIRouter(tags=["WebSockets"])
 
+@router.websocket("/ws/leagues")
+async def leagues_list_ws(
+    websocket: WebSocket,
+    token: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Avisa en vivo a quien está viendo la lista de ligas (liga_creada, liga_actualizada).
+    Solo emite; lo que mande el cliente se ignora. Token inválido -> cierre 4401."""
+    user = _user_from_token(db, token)
+    db.close()
+    if user is None:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
 
-@router.websocket("/ws/matches/{match_id}")
-async def match_ws(websocket: WebSocket, match_id: int):
-    """REQ 16 - Ver el partido en vivo.
+    await manager.connect(league_list_events.LIST_ROOM, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # solo para detectar la desconexión
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(league_list_events.LIST_ROOM, websocket)
 
-    Iría acá:
-      1. Validar el token (query param) -> si es inválido, cerrar la conexión.
-      2. manager.connect(f"match:{match_id}", websocket)
-      3. Mandar de entrada el estado actual del partido.
-      4. Mantener la conexión abierta (el MotorDePartido hace el broadcast en cada tick).
-      5. En WebSocketDisconnect -> manager.disconnect(...)
+@router.websocket("/ws/matches/{match_id}/live")
+async def match_live_ws(
+    websocket: WebSocket,
+    match_id: str,
+    token: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """REQ 16 - Canal en vivo de un partido (versión simplificada).
+
+    El servidor solo EMITE `tick` y `partido_finalizado` (contrato AsyncAPI); lo que mande
+    el cliente se ignora. `match_id` es el id del partido (Match.id), sea de amistoso o de
+    liga. El motor (MatchEngine) hace el broadcast a la sala.
+
+    - Token inválido -> cierre 4401. Partido inexistente o ya finalizado -> cierre 4404.
+    - Se acepta aunque el partido todavía no esté en_curso (cuenta regresiva): el cliente
+      no recibe nada hasta el primer tick. Tampoco se envía un estado inicial al conectar.
+    - 30 s después de partido_finalizado, el servidor cierra las conexiones de la sala.
     """
-    await websocket.accept()
-    await websocket.send_json({"type": "error", "data": "Sin implementar: REQ 16"})
-    await websocket.close()
+    user = _user_from_token(db, token)
+    match_exists = user is not None and match_service.match_is_watchable(db, match_id)
+    # Se libera la sesión ya: la conexión puede durar minutos y no debe retener la de la DB.
+    db.close()
+
+    if user is None:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+    if not match_exists:
+        await websocket.close(code=WS_CLOSE_NOT_FOUND)
+        return
+
+    room = match_room(match_id)
+    await manager.connect(room, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # solo para detectar la desconexión
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(room, websocket)
 
 
 @router.websocket("/ws/leagues/{league_id}/lobby")

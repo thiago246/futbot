@@ -198,6 +198,7 @@ def test_arco_rival_correcto_por_lado():
 async def test_run_construye_el_estado_si_no_existe():
     engine = _engine()
     with patch("app.engine.match_engine.manager.broadcast", new_callable=AsyncMock), \
+         patch("app.engine.match_engine.manager.schedule_close"), \
          patch.object(MatchEngine, "_persist_state"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         await engine.run()
@@ -208,12 +209,13 @@ async def test_run_construye_el_estado_si_no_existe():
 async def test_run_hace_tick_hasta_terminar_y_descarta_el_estado():
     engine = _engine_started(duration_minutes=1)
     with patch("app.engine.match_engine.manager.broadcast", new_callable=AsyncMock) as bc, \
+         patch("app.engine.match_engine.manager.schedule_close"), \
          patch.object(MatchEngine, "_persist_state") as persist, \
          patch("asyncio.sleep", new_callable=AsyncMock) as sleep:
         await engine.run()
     assert sleep.await_count == TICKS_PER_MINUTE
     assert bc.await_count == TICKS_PER_MINUTE + 1  # + 1 final de "finished"
-    assert bc.await_args_list[-1].args[1]["type"] == "finished"
+    assert bc.await_args_list[-1].args[1]["tipo"] == "partido_finalizado"
     assert persist.call_count == TICKS_PER_MINUTE + 1
     assert persist.call_args_list[-1].kwargs == {"final": True}
     assert engine.state is None
@@ -224,6 +226,7 @@ async def test_run_no_hace_nada_si_ya_estaba_terminado():
     engine = _engine_started(duration_minutes=1)
     engine.state.current_tick = TICKS_PER_MINUTE
     with patch("app.engine.match_engine.manager.broadcast", new_callable=AsyncMock) as bc, \
+         patch("app.engine.match_engine.manager.schedule_close"), \
          patch.object(MatchEngine, "_persist_state") as persist, \
          patch("asyncio.sleep", new_callable=AsyncMock) as sleep:
         await engine.run()

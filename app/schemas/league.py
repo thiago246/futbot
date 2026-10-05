@@ -42,18 +42,31 @@ class LeagueResponseSchema(BaseModel):
             estado=league.status,
         )
 
+
+class LeagueListItemSchema(LeagueResponseSchema):
+    equiposActuales: int = 0
+
+    @classmethod
+    def from_league_count(cls, league: object, count: int) -> "LeagueListItemSchema":
+        base = LeagueResponseSchema.from_league(league)
+        return cls(**base.model_dump(), equiposActuales=count)
+
+
 class LeagueJoinSchema(BaseModel):
     password: Optional[str] = None
 
+
 class PaginatedLeaguesSchema(BaseModel):
-    items: list[LeagueResponseSchema]
+    items: list[LeagueListItemSchema]
     page: int
     pageSize: int
     total: int
 
+
 class LobbyClubSchema(BaseModel):
     clubId: str
     nombre: str
+
 
 class LeagueLobbyOut(BaseModel):
     """'Imagen' del lobby de espera: la liga, los clubes inscriptos y los cupos que quedan."""

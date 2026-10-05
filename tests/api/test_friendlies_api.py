@@ -10,7 +10,8 @@ import pytest
 from app.models.behavior import Behavior
 from app.models.club_player import ClubPlayer
 from app.models.friendly import Friendly
-from app.models.squads import Squad, SquadMember
+from app.models.squads import FriendlySquadMember, Squad, SquadMember
+from app.services import friendly_service
 
 CREATOR_PAYLOAD = {
     "username": "creator",
@@ -40,11 +41,16 @@ def _register(client, payload=CREATOR_PAYLOAD):
 
 def _create_default_squad(db_session, club_id):
     """Inserta directo en la DB una plantilla válida para el club."""
-    behavior = db_session.query(Behavior).filter_by(name="test-behavior").first()
-    if behavior is None:
-        behavior = Behavior(name="test-behavior", code="pass", is_default=False)
-        db_session.add(behavior)
-        db_session.flush()
+    # 6 comportamientos distintos: un club no puede repetir uno en su plantilla.
+    # Se reutilizan entre clubes: clubes distintos sí pueden usar el mismo.
+    behaviors = []
+    for i in range(6):
+        behavior = db_session.query(Behavior).filter_by(name=f"test-behavior-{i}").first()
+        if behavior is None:
+            behavior = Behavior(name=f"test-behavior-{i}", code="pass", is_default=False)
+            db_session.add(behavior)
+            db_session.flush()
+        behaviors.append(behavior)
 
     players = [
         ClubPlayer(
@@ -64,10 +70,25 @@ def _create_default_squad(db_session, club_id):
         db_session.add(SquadMember(
             squad_id=squad.id,
             club_player_id=player.id,
-            behavior_id=behavior.id,
+            behavior_id=behaviors[i].id,
             is_starter=i < 3,
         ))
     db_session.commit()
+
+
+@pytest.fixture(autouse=True)
+def countdown(monkeypatch):
+    """Unirse agenda run_countdown con BackgroundTasks, y el TestClient espera a que
+    terminen: sin esto cada join exitoso tardaría 15 s y el partido terminaría en
+    "en_curso" (y la tarea abriría la DB real, no la de los tests).
+    Devuelve la lista de partidos cuya cuenta regresiva se agendó."""
+    scheduled = []
+
+    async def fake_run_countdown(friendly_id):
+        scheduled.append(friendly_id)
+
+    monkeypatch.setattr(friendly_service, "run_countdown", fake_run_countdown)
+    return scheduled
 
 
 def test_create_friendly_invalid_token(client):
@@ -325,9 +346,10 @@ def test_join_friendly_invalid_token(client):
     assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
-def test_join_friendly_success(client, db_session):
+def test_join_friendly_success(client, db_session, countdown):
     _, home_club_id = _register(client)
     rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
     _create_default_squad(db_session, rival_club_id)
     friendly = _insert_friendly(db_session, home_club_id=home_club_id)
 
@@ -338,12 +360,14 @@ def test_join_friendly_success(client, db_session):
     assert body["id"] == friendly.id
     assert body["clubLocalId"] == home_club_id
     assert body["clubVisitanteId"] == rival_club_id
-    assert body["estado"] == "programado"
+    assert body["estado"] == "cuenta_regresiva"
+    assert countdown == [friendly.id]
 
 
 def test_join_friendly_is_saved(client, db_session):
     _, home_club_id = _register(client)
     rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
     _create_default_squad(db_session, rival_club_id)
     friendly = _insert_friendly(db_session, home_club_id=home_club_id)
 
@@ -352,7 +376,7 @@ def test_join_friendly_is_saved(client, db_session):
     db_session.expire_all()
     saved = db_session.get(Friendly, friendly.id)
     assert saved.away_club_id == rival_club_id
-    assert saved.status == "programado"
+    assert saved.status == "cuenta_regresiva"
 
 
 def test_join_friendly_own_match(client, db_session):
@@ -386,6 +410,7 @@ def test_join_friendly_match_full(client, db_session):
 def test_join_friendly_twice_is_rejected(client, db_session):
     _, home_club_id = _register(client)
     rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
     _create_default_squad(db_session, rival_club_id)
     friendly = _insert_friendly(db_session, home_club_id=home_club_id)
 
@@ -437,12 +462,139 @@ def test_join_friendly_unknown_match(client, db_session):
 def test_join_friendly_removes_it_from_the_waiting_list(client, db_session):
     _, home_club_id = _register(client)
     rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
     _create_default_squad(db_session, rival_club_id)
     friendly = _insert_friendly(db_session, home_club_id=home_club_id)
 
     _join(client, rival_headers, friendly.id)
 
     waiting = client.get("/api/v1/matches?estado=esperando_rival", headers=rival_headers).json()
-    scheduled = client.get("/api/v1/matches?estado=programado", headers=rival_headers).json()
+    counting_down = client.get("/api/v1/matches?estado=cuenta_regresiva", headers=rival_headers).json()
     assert waiting["items"] == []
-    assert [item["id"] for item in scheduled["items"]] == [friendly.id]
+    assert [item["id"] for item in counting_down["items"]] == [friendly.id]
+
+# ---------------------------------------------------------------------------
+# Inicio automático al unirse: plantillas congeladas y cuenta regresiva
+# ---------------------------------------------------------------------------
+THIRD_PAYLOAD = {
+    "username": "third",
+    "email": "third@example.com",
+    "password": "12345678",
+    "avatar": "1",
+    "clubNombre": "third club",
+}
+
+FOURTH_PAYLOAD = {
+    "username": "fourth",
+    "email": "fourth@example.com",
+    "password": "12345678",
+    "avatar": "1",
+    "clubNombre": "fourth club",
+}
+
+
+def _snapshot_count(db_session, friendly_id):
+    return db_session.query(FriendlySquadMember).filter_by(friendly_id=friendly_id).count()
+
+
+def test_join_friendly_freezes_both_squads(client, db_session):
+    _, home_club_id = _register(client)
+    rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
+    _create_default_squad(db_session, rival_club_id)
+    friendly = _insert_friendly(db_session, home_club_id=home_club_id)
+
+    _join(client, rival_headers, friendly.id)
+
+    db_session.expire_all()
+    assert _snapshot_count(db_session, friendly.id) == 12
+
+
+def test_join_friendly_rejected_does_not_start_anything(client, db_session, countdown):
+    home_headers, home_club_id = _register(client)
+    _create_default_squad(db_session, home_club_id)
+    friendly = _insert_friendly(db_session, home_club_id=home_club_id)
+
+    response = _join(client, home_headers, friendly.id)  # su propio partido
+
+    assert response.status_code == 409
+    assert countdown == []
+    assert _snapshot_count(db_session, friendly.id) == 0
+
+
+def test_join_friendly_twice_schedules_a_single_countdown(client, db_session, countdown):
+    _, home_club_id = _register(client)
+    rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
+    _create_default_squad(db_session, rival_club_id)
+    friendly = _insert_friendly(db_session, home_club_id=home_club_id)
+
+    _join(client, rival_headers, friendly.id)
+    _join(client, rival_headers, friendly.id)
+
+    assert countdown == [friendly.id]
+    assert _snapshot_count(db_session, friendly.id) == 12
+
+
+def test_join_friendly_when_home_club_has_no_squad(client, db_session, countdown):
+    """El local pudo perder/no tener plantilla desde que publicó el amistoso."""
+    _, home_club_id = _register(client)
+    rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, rival_club_id)
+    friendly = _insert_friendly(db_session, home_club_id=home_club_id)
+
+    response = _join(client, rival_headers, friendly.id)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "SQUAD_NOT_CONFIGURED"
+    db_session.refresh(friendly)
+    assert friendly.away_club_id is None
+    assert friendly.status == "esperando_rival"
+    assert countdown == []
+
+
+def test_join_friendly_when_a_club_repeats_a_behavior(client, db_session, countdown):
+    """Un comportamiento puede usarse en varios partidos, pero un mismo club no
+    puede usarlo dos veces dentro del mismo partido."""
+    _, home_club_id = _register(client)
+    rival_headers, rival_club_id = _register(client, RIVAL_PAYLOAD)
+    _create_default_squad(db_session, home_club_id)
+    _create_default_squad(db_session, rival_club_id)
+    members = (
+        db_session.query(SquadMember)
+        .join(Squad, SquadMember.squad_id == Squad.id)
+        .filter(Squad.club_id == rival_club_id)
+        .order_by(SquadMember.id)
+        .all()
+    )
+    members[1].behavior_id = members[0].behavior_id
+    db_session.commit()
+    friendly = _insert_friendly(db_session, home_club_id=home_club_id)
+
+    response = _join(client, rival_headers, friendly.id)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "BEHAVIOR_IN_USE"
+    db_session.refresh(friendly)
+    assert friendly.away_club_id is None
+    assert friendly.status == "esperando_rival"
+    assert countdown == []
+
+
+def test_join_friendly_allows_simultaneous_matches_sharing_behaviors(client, db_session, countdown):
+    """Cuatro clubes con los mismos 6 comportamientos, dos partidos a la vez."""
+    _, first_home = _register(client)
+    first_rival_headers, first_rival = _register(client, RIVAL_PAYLOAD)
+    _, second_home = _register(client, THIRD_PAYLOAD)
+    second_rival_headers, second_rival = _register(client, FOURTH_PAYLOAD)
+    for club_id in (first_home, first_rival, second_home, second_rival):
+        _create_default_squad(db_session, club_id)
+    first = _insert_friendly(db_session, home_club_id=first_home, minutes=0)
+    second = _insert_friendly(db_session, home_club_id=second_home, minutes=1)
+
+    first_response = _join(client, first_rival_headers, first.id)
+    second_response = _join(client, second_rival_headers, second.id)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert countdown == [first.id, second.id]

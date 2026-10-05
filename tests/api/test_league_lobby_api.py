@@ -50,23 +50,23 @@ def test_get_lobby_empty(client, world):
     r = client.get(f"/api/v1/leagues/{lid}/lobby", headers=_h(tokens["a"]))
     assert r.status_code == 200
     body = r.json()
-    assert body["equiposActuales"] == 0 and body["cuposRestantes"] == 4
-    assert body["listaParaIniciar"] is False and body["equipos"] == []
+    assert body["equiposActuales"] == 1 and body["cuposRestantes"] == 3
+    assert body["listaParaIniciar"] is False
+    assert [e["nombre"] for e in body["equipos"]] == ["Club a"]
 
 
 def test_get_lobby_lists_members_and_capacity(client, world):
     tokens, lid = world
     _join(client, tokens["b"], lid)
-    _join(client, tokens["c"], lid)
     body = client.get(f"/api/v1/leagues/{lid}/lobby", headers=_h(tokens["a"])).json()
     assert body["equiposActuales"] == 2 and body["cuposRestantes"] == 2
-    assert [e["nombre"] for e in body["equipos"]] == ["Club b", "Club c"]
+    assert [e["nombre"] for e in body["equipos"]] == ["Club a", "Club b"]
     assert body["minEquipos"] == 3 and body["maxEquipos"] == 4
 
 
 def test_get_lobby_ready_flag_when_min_reached(client, world):
     tokens, lid = world
-    for n in "abc":
+    for n in "bc":  # a ya está: con b y c son 3
         _join(client, tokens[n], lid)
     body = client.get(f"/api/v1/leagues/{lid}/lobby", headers=_h(tokens["a"])).json()
     assert body["listaParaIniciar"] is True
@@ -116,7 +116,7 @@ def test_ws_receives_equipo_unido_on_join(client, world):
         msg = ws.receive_json()
     assert msg["tipo"] == "equipo_unido"
     assert msg["clubNombre"] == "Club b"
-    assert (msg["equiposActuales"], msg["maxEquipos"], msg["cuposRestantes"]) == (1, 4, 3)
+    assert (msg["equiposActuales"], msg["maxEquipos"], msg["cuposRestantes"]) == (2, 4, 2)
 
 
 def test_ws_receives_equipo_abandono_on_leave(client, world):
@@ -126,40 +126,39 @@ def test_ws_receives_equipo_abandono_on_leave(client, world):
         assert _leave(client, tokens["b"], lid).status_code == 200
         msg = ws.receive_json()
     assert msg["tipo"] == "equipo_abandono" and msg["clubNombre"] == "Club b"
-    assert msg["equiposActuales"] == 0 and msg["cuposRestantes"] == 4
+    assert msg["equiposActuales"] == 1 and msg["cuposRestantes"] == 3
 
 
 def test_ws_ready_sent_when_min_reached_and_only_once(client, world):
     tokens, lid = world
     with client.websocket_connect(f"/ws/leagues/{lid}/lobby?token={tokens['a']}") as ws:
-        for n in "bcd":
+        for n in "bc":
             _join(client, tokens[n], lid)
-        types = [ws.receive_json()["tipo"] for _ in range(4)]
-    # b -> unido | c -> unido | d (3ro, llega al mínimo) -> unido + lista
-    assert types == ["equipo_unido", "equipo_unido", "equipo_unido", "liga_lista_para_iniciar"]
+        types = [ws.receive_json()["tipo"] for _ in range(3)]
+    # b (2) -> unido | c (3, llega al mínimo) -> unido + lista
+    assert types == ["equipo_unido", "equipo_unido", "liga_lista_para_iniciar"]
 
 
 def test_ws_no_ready_if_min_already_reached(client, world):
     tokens, lid = world
-    for n in "bcd":
+    for n in "bc":  # con a son 3: el mínimo ya estaba
         _join(client, tokens[n], lid)
     with client.websocket_connect(f"/ws/leagues/{lid}/lobby?token={tokens['a']}") as ws:
-        _join(client, tokens["e"], lid)  # 4to club, el mínimo ya estaba
+        _join(client, tokens["d"], lid)  # 4to club
         assert ws.receive_json()["tipo"] == "equipo_unido"
-        _leave(client, tokens["e"], lid)
+        _leave(client, tokens["d"], lid)
         assert ws.receive_json()["tipo"] == "equipo_abandono"  # nada de "lista" en el medio
 
 
 def test_ws_ready_sent_again_after_leave_and_rejoin(client, world):
     tokens, lid = world
-    for n in "bc":
-        _join(client, tokens[n], lid)
+    _join(client, tokens["b"], lid)  # con a son 2
     with client.websocket_connect(f"/ws/leagues/{lid}/lobby?token={tokens['a']}") as ws:
-        _join(client, tokens["d"], lid)
+        _join(client, tokens["c"], lid)
         assert [ws.receive_json()["tipo"] for _ in range(2)] == ["equipo_unido", "liga_lista_para_iniciar"]
-        _leave(client, tokens["d"], lid)
+        _leave(client, tokens["c"], lid)
         assert ws.receive_json()["tipo"] == "equipo_abandono"
-        _join(client, tokens["d"], lid)
+        _join(client, tokens["c"], lid)
         assert [ws.receive_json()["tipo"] for _ in range(2)] == ["equipo_unido", "liga_lista_para_iniciar"]
 
 
@@ -187,3 +186,92 @@ def test_ws_room_is_cleaned_after_disconnect(client, world):
     with client.websocket_connect(f"/ws/leagues/{lid}/lobby?token={tokens['a']}"):
         assert f"league:{lid}" in manager.rooms
     assert f"league:{lid}" not in manager.rooms
+
+
+def test_ws_list_receives_update_on_join_and_leave(client, world):
+    tokens, lid = world
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as ws:
+        _join(client, tokens["b"], lid)
+        msg = ws.receive_json()
+        assert msg["tipo"] == "liga_actualizada" and msg["equiposActuales"] == 2
+        _leave(client, tokens["b"], lid)
+        assert ws.receive_json()["equiposActuales"] == 1
+
+
+def test_ws_list_receives_new_league(client, world):
+    tokens, _ = world
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as ws:
+        _league(client, tokens["b"])
+        assert ws.receive_json()["tipo"] == "liga_creada"
+
+def test_ws_list_rejects_missing_token(client, world):
+    with pytest.raises(WebSocketDisconnect) as e:
+        with client.websocket_connect("/ws/leagues"):
+            pass
+    assert e.value.code == 4401
+
+
+def test_ws_list_rejects_invalid_token(client, world):
+    with pytest.raises(WebSocketDisconnect) as e:
+        with client.websocket_connect("/ws/leagues?token=basura"):
+            pass
+    assert e.value.code == 4401
+
+
+def test_ws_list_receives_new_league_with_payload(client, world):
+    tokens, _ = world
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as ws:
+        _league(client, tokens["b"])
+        msg = ws.receive_json()
+    assert msg["tipo"] == "liga_creada"
+    assert msg["liga"]["nombre"] == "Liga"
+    assert msg["liga"]["equiposActuales"] == 1   # el creador ya está inscripto
+    assert msg["total"] == 2
+
+
+def test_ws_list_update_when_league_fills_and_reopens(client, world):
+    tokens, lid = world  # maxEquipos = 4, a ya está
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as ws:
+        for n in "bcd":
+            _join(client, tokens[n], lid)
+        msgs = [ws.receive_json() for _ in range(3)]
+        assert msgs[-1]["equiposActuales"] == 4
+        assert msgs[-1]["estado"] == "en_curso"
+        _leave(client, tokens["d"], lid)
+        msg = ws.receive_json()
+    assert msg["equiposActuales"] == 3
+    assert msg["estado"] == "esperando_equipos"
+
+
+def test_ws_list_failed_join_emits_nothing(client, world):
+    tokens, lid = world
+    _join(client, tokens["b"], lid)
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as ws:
+        assert _join(client, tokens["b"], lid).status_code == 409  # ya inscripto
+        _join(client, tokens["c"], lid)
+        msg = ws.receive_json()
+    # el primer mensaje es el del join válido de c, no el del fallido de b
+    assert msg["equiposActuales"] == 3
+
+
+def test_ws_list_all_connected_clients_get_the_event(client, world):
+    tokens, lid = world
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}") as w1, \
+         client.websocket_connect(f"/ws/leagues?token={tokens['c']}") as w2:
+        _join(client, tokens["b"], lid)
+        assert w1.receive_json()["tipo"] == "liga_actualizada"
+        assert w2.receive_json()["tipo"] == "liga_actualizada"
+
+
+def test_ws_list_room_is_cleaned_after_disconnect(client, world):
+    tokens, _ = world
+    with client.websocket_connect(f"/ws/leagues?token={tokens['a']}"):
+        assert "leagues:list" in manager.rooms
+    assert "leagues:list" not in manager.rooms
+
+def test_get_leagues_includes_member_count(client, world):
+    tokens, lid = world
+    _join(client, tokens["b"], lid)
+    _join(client, tokens["c"], lid)
+    body = client.get("/api/v1/leagues", headers=_h(tokens["a"])).json()
+    assert body["items"][0]["equiposActuales"] == 3

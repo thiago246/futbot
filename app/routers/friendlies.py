@@ -1,10 +1,11 @@
 """REQ 11 a 14 - Amistosos.
 
 Los amistosos viven bajo /matches 
-(POST /matches, GET /matches, POST /matches/{id}/join, POST /matches/{id}/start).
+(POST /matches, GET /matches, POST /matches/{id}/join).
+Unirse inicia el partido automáticamente: no hay un POST /matches/{id}/start.
 El router de matches.py solo se ocupa de GET /matches/{id}.
 """
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -49,13 +50,13 @@ def list_friendlies(
 @router.post("/{match_id}/join", response_model=FriendlyOut)
 def join_friendly(
     match_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Unirse a un amistoso esperando rival: el club propio queda como visitante
-    y el partido pasa a "programado"."""
-    return friendly_service.join_friendly(db, current_user, match_id)
-
-
-# Pendientes:
-#   POST "/{match_id}/start" -> Iniciar partido
+    """Unirse a un amistoso esperando rival: el club propio queda como visitante,
+    se congelan las plantillas de ambos clubes y el partido pasa a "cuenta_regresiva".
+    A los 15 segundos pasa solo a "en_curso"."""
+    friendly = friendly_service.join_friendly(db, current_user, match_id)
+    background_tasks.add_task(friendly_service.run_countdown, friendly.id)
+    return friendly
